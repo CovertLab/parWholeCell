@@ -3,8 +3,8 @@ parWholeCell
 Project to develop a parallelized whole-cell model simulator. 
 
 Currently implements a simplified whole-cell model using object-oriented MATLAB. 
-![Model](https://raw.github.com/CovertLab/parWholeCell/master/doc/model.png)
-![Simulation architecture](https://raw.github.com/CovertLab/parWholeCell/master/doc/architecture.png)
+![Model](https://github.com/CovertLab/parWholeCell/raw/master/doc/model.png)
+![Simulation architecture](https://github.com/CovertLab/parWholeCell/raw/master/doc/architecture.png)
 
 As of 3/12/2013 the code implements a simple whole-cell model containing 7 submodels. The submodels are extremely simple.
 * Complexation

@@ -303,7 +303,8 @@ classdef Metabolism < wholecell.sim.process.Process
             bounds.lo = min(0, max(bounds.lo * this.timeStepSec, -this.realMax));
             bounds.up = max(0, min(bounds.up * this.timeStepSec,  this.realMax));
             
-            %flux-balance analysis
+            %flux-balance analysis 
+            %TODO: make flexible similar to full whole-cell model
             [x, ~, ~, errorFlag, errorMsg] = linearProgramming(...
                 'maximize', this.objective, ...
                 this.sMat, this.dConc_dt, ...

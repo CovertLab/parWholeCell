@@ -37,6 +37,8 @@ classdef MoleculeCounts < wholecell.sim.state.State
         
         metMediaConc     %metabolite media concentration (mM)
         metBiomassConc   %metabolite biomass concentration (molecules/cell)
+        fracInitFreeNMPs = 0.03;
+        fracInitFreeAAs = 0.001;
         
         rnaLens          %RNA lengths
         rnaExp           %mature RNA expression
@@ -137,6 +139,8 @@ classdef MoleculeCounts < wholecell.sim.state.State
                 [kb.proteins.mw]'
                 ];
             
+            [~, this.idx.ntps] = this.getIndex({'ATP[c]'; 'CTP[c]'; 'GTP[c]'; 'UTP[c]'});
+            [~, this.idx.ndps] = this.getIndex({'ADP[c]'; 'CDP[c]'; 'GDP[c]'; 'UDP[c]'});
             [~, this.idx.nmps] = this.getIndex({'AMP[c]'; 'CMP[c]'; 'GMP[c]'; 'UMP[c]'});
             [~, this.idx.aas] = this.getIndex({
                 'ALA[c]'; 'ARG[c]'; 'ASN[c]'; 'ASP[c]'; 'CYS[c]'; 'GLU[c]'; 'GLN[c]'; 'GLY[c]'; 'HIS[c]'; 'ILE[c]';  'LEU[c]';
@@ -209,14 +213,14 @@ classdef MoleculeCounts < wholecell.sim.state.State
             this.counts(metCompIdxs) = round(this.metBiomassConc);
             
             %RNA
-            rnaCnts = this.randStream.mnrnd(round(sum(this.counts(this.idx.nmps, this.cIdx.c)) / (this.rnaExp' * this.rnaLens)), this.rnaExp);
-            this.counts(this.idx.nmps, this.cIdx.c) = 0;
+            rnaCnts = this.randStream.mnrnd(round((1 - this.fracInitFreeNMPs) * sum(this.counts(this.idx.nmps, this.cIdx.c)) / (this.rnaExp' * this.rnaLens)), this.rnaExp);
+            this.counts(this.idx.nmps, this.cIdx.c) = round(this.fracInitFreeNMPs * this.counts(this.idx.nmps, this.cIdx.c));
             rnaCompIdxs = sub2ind(size(this.counts), this.idx.matureRna, this.localizations(this.idx.matureRna));
             this.counts(rnaCompIdxs) = rnaCnts;
             
             %protein monomers
-            monCnts = this.randStream.mnrnd(round(sum(this.counts(this.idx.aas, this.cIdx.c)) / (this.monExp' * this.monLens)), this.monExp);
-            this.counts(this.idx.aas, this.cIdx.c) = 0;
+            monCnts = this.randStream.mnrnd(round(sum((1 - this.fracInitFreeAAs) * this.counts(this.idx.aas, this.cIdx.c)) / (this.monExp' * this.monLens)), this.monExp);
+            this.counts(this.idx.aas, this.cIdx.c) = round(this.fracInitFreeAAs * this.counts(this.idx.aas, this.cIdx.c));
             protCompIdxs = sub2ind(size(this.counts), this.idx.matureMonomers, this.localizations(this.idx.matureMonomers));
             this.counts(protCompIdxs) = monCnts;
             

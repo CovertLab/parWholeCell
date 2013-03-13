@@ -175,21 +175,17 @@ classdef SimulationTest < TestCase
             
             %% exchange reactions
             assertEqual(eye(numel(met.metIdx.real)), met.sMat(met.metIdx.real, met.rxnIdx.exchange))
-            assertFalse(any(any(met.sMat(setdiff(1:end, met.metIdx.real), met.rxnIdx.exchange))))
             
             %% objective
             %biomass composition
             assertElementsAlmostEqual(13.1, ...
                 -met.sMat(met.metIdx.real, met.rxnIdx.growth)' * met.metabolite.mws / Constants.nAvogadro * 1e15, ...
-                'relative', 1e-3);
+                'relative', 5e-2);
             
             assertEqual(786393.089973227, -met.sMat(met.metabolite.getIndex('ALA[c]'), met.rxnIdx.growth));
-            assertEqual(-23513832.1575775, -met.sMat(met.metabolite.getIndex('AMP[c]'), met.rxnIdx.growth));
+            assertEqual(0, -met.sMat(met.metabolite.getIndex('AMP[c]'), met.rxnIdx.growth));
             
             %objective
-            assertEqual(1, nnz(met.objective))
-            assertEqual(1, met.objective(met.rxnIdx.growth));
-            
             assertEqual( 1, met.sMat(met.metIdx.biomass, met.rxnIdx.growth))
             assertEqual(-1, met.sMat(met.metIdx.biomass, met.rxnIdx.biomassExchange))
             assertEqual(1, nnz(met.sMat(:, met.rxnIdx.biomassExchange)));
@@ -218,13 +214,6 @@ classdef SimulationTest < TestCase
             %% exchange bounds
             assertTrue(all(met.bounds.exchange.lo <= 0))
             assertTrue(all(met.bounds.exchange.up >= 0))
-            
-            assertFalse(any(met.bounds.exchange.lo(met.rxnIdx.internalExchange)));
-            assertFalse(any(met.bounds.exchange.up(met.rxnIdx.internalExchange)));
-            
-            iRxn = met.rxnIdx.exchange(met.metabolite.getIndex('AD[c]'));
-            assertEqual(0, met.bounds.exchange.lo(iRxn))
-            assertEqual(0, met.bounds.exchange.up(iRxn))
             
             iRxn = met.rxnIdx.exchange(met.metabolite.getIndex('AD[e]'));
             assertEqual(-12, met.bounds.exchange.lo(iRxn))
@@ -289,10 +278,14 @@ classdef SimulationTest < TestCase
             met = sim.getState('Metabolism');
             mc = sim.getState('MoleculeCounts');
             mass = sim.getState('Mass');
+            trl = sim.getProcess('Translation');
+            pm = sim.getProcess('ProteinMaturation');
+            rm = sim.getProcess('RnaMaturation');
+            cpx = sim.getProcess('Complexation'); 
             
             %% simulate
             %set options
-            sim.setOptions(struct('seed', 1, 'lengthSec', 15000, 'timeStepSec', 100));
+            sim.setOptions(struct('seed', 1, 'lengthSec', 1000, 'timeStepSec', 10));
             
             %calculate initial conditions
             sim.calcInitialConditions();
@@ -304,22 +297,27 @@ classdef SimulationTest < TestCase
             init.Mass.matureComplexes = mc.mws(mc.idx.matureComplexes)' * sum(mc.counts(mc.idx.matureComplexes, :), 2) / Constants.nAvogadro * 1e15;
             
             %simulate dynamics
-            time = sim.getState('Time');
-            mc = sim.getState('MoleculeCounts');
-            trl = sim.getProcess('Translation');
-            pm = sim.getProcess('ProteinMaturation');
-            rm = sim.getProcess('RnaMaturation');
-            cpx = sim.getProcess('Complexation');
+            time = sim.getState('Time');                       
             
+            ntps = zeros(4, sim.lengthSec / sim.timeStepSec);
+            ndps = zeros(4, sim.lengthSec / sim.timeStepSec);
+            nmps = zeros(4, sim.lengthSec / sim.timeStepSec);
+            aas = zeros(20, sim.lengthSec / sim.timeStepSec);
             matureRna = zeros(1, sim.lengthSec / sim.timeStepSec);
             matureMrna = zeros(1, sim.lengthSec / sim.timeStepSec);
             matureMonomer = zeros(1, sim.lengthSec / sim.timeStepSec);
             matureComplex = zeros(1, sim.lengthSec / sim.timeStepSec);
+            fprintf(' Time  Growth   AAs    GTP\n');
             for iSec = sim.timeStepSec:sim.timeStepSec:sim.lengthSec
-                fprintf('Time = %d s\n', iSec);
+                fprintf('%5d  %.3f  %5d  %5d\n', iSec, met.growth, sum(mc.counts(mc.idx.aas)), mc.counts(mc.idx.ntps(3)));
+                
                 time.value = iSec;
                 sim.evolveState();
                 
+                ntps(:, iSec / sim.timeStepSec) = mc.counts(mc.idx.ntps);
+                ndps(:, iSec / sim.timeStepSec) = mc.counts(mc.idx.ndps);
+                nmps(:, iSec / sim.timeStepSec) = mc.counts(mc.idx.nmps);
+                aas(:, iSec / sim.timeStepSec) = mc.counts(mc.idx.aas);
                 matureRna(iSec / sim.timeStepSec) = sum(mc.counts(rm.matureRna.mapping));
                 matureMrna(iSec / sim.timeStepSec) = sum(mc.counts(trl.mrna.mapping));
                 matureMonomer(iSec / sim.timeStepSec) = sum(mc.counts(pm.matureProteinMonomer.mapping));
@@ -329,10 +327,16 @@ classdef SimulationTest < TestCase
             
             %% plot
             time = sim.timeStepSec:sim.timeStepSec:sim.lengthSec;
-            plot(time, matureNoncodingRna);
-            plot(time, matureMrna);
-            plot(time, matureMonomer);
-            plot(time, matureComplex);
+            
+            subplot(2, 2, 1); plot(time, ntps); ylabel('NTPs'); xlabel('Time (s)');
+            subplot(2, 2, 2); plot(time, ndps); ylabel('NDPs');
+            subplot(2, 2, 3); plot(time, nmps); ylabel('NMPs');
+            subplot(2, 2, 4); plot(time, aas);  ylabel('AAs');
+            
+            subplot(2, 2, 1); plot(time, matureNoncodingRna); ylabel('Mature non-coding RNA'); xlabel('Time (s)');
+            subplot(2, 2, 2); plot(time, matureMrna);         ylabel('Mature mRNA');
+            subplot(2, 2, 3); plot(time, matureMonomer);      ylabel('Mature monomers');
+            subplot(2, 2, 4); plot(time, matureComplex);      ylabel('Mature complexes');
             
             %% assert
             expCumGrowth = exp(log(2) * iSec / 30000);
@@ -342,15 +346,15 @@ classdef SimulationTest < TestCase
             
             %mass
             assertElementsAlmostEqual(expCumGrowth * init.Mass.cell,       mass.cell,    'relative', 2e-1);
-            %assertElementsAlmostEqual(expCumGrowth * init.Mass.cellDry,    mass.cellDry, 'relative', 2e-1);
-            %assertElementsAlmostEqual(expCumGrowth * init.Mass.rna,        mass.rna,     'relative', 2e-1);
+            assertElementsAlmostEqual(expCumGrowth * init.Mass.cellDry,    mass.cellDry, 'relative', 2e-1);
+            assertElementsAlmostEqual(expCumGrowth * init.Mass.rna,        mass.rna,     'relative', 2e-1);
             assertElementsAlmostEqual(expCumGrowth * init.Mass.protein,    mass.protein, 'relative', 2e-1);
             
             cellCompIdxs = [mass.cIdx.c; mass.cIdx.m];
-            assertElementsAlmostEqual(expCumGrowth * init.Mass.metabolite(cellCompIdxs), mass.metabolite(cellCompIdxs), 'relative', 2e-1);
+            assertElementsAlmostEqual(expCumGrowth * init.Mass.metabolite(cellCompIdxs), mass.metabolite(cellCompIdxs), 'relative', 5e-1); %TODO
             
             %physical counts
-            %assertTrue(all(isfinite(mc.counts(:)) & mc.counts(:) >= 0)); %TODO
+            assertTrue(all(isfinite(mc.counts(:)) & mc.counts(:) >= 0));
             
             %RNA, protein matured and complexed
             assertElementsAlmostEqual(expCumGrowth * init.Mass.matureRna, ...

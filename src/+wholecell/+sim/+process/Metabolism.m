@@ -40,6 +40,8 @@ classdef Metabolism < wholecell.sim.process.Process
         avgCellInitMass = 13.1     %fg
         cellCycleLen = 9 * 3600    %s
         
+        unaccountedEnergyConsumption = 6.2750e+07 %ATP / cell cycle
+        
         objective                  %FBA LP objective (max growth)
         sMat                       %stoichiometry matrix [met x rxn]
         eMat                       %enzyme catalysis matrix [rxn x enz]
@@ -47,6 +49,8 @@ classdef Metabolism < wholecell.sim.process.Process
         dConc_dt                   %dCont/dt (FBA LP RHS)
         metConstTypes              %metabolite constraint types
         rxnVarTypes                %rxn variable types
+        rxnNewFlux
+        rxnRecycFlux
         
         metIds                     %metabolite ids
         metNames                   %metabolite names
@@ -90,6 +94,7 @@ classdef Metabolism < wholecell.sim.process.Process
             this.enzyme = sim.getState('MoleculeCounts').addPartition(this, enzIds, @this.calcReqEnzyme);
             this.mass = sim.getState('Mass').addPartition(this);
             
+            this.metabolite.idx.atpHydrolysis = this.metabolite.getIndex({'ATP[c]'; 'H2O[c]'; 'ADP[c]'; 'PI[c]'; 'H[c]'});
             this.metabolite.idx.ntps = this.metabolite.getIndex({'ATP[c]'; 'CTP[c]'; 'GTP[c]'; 'UTP[c]'});
             this.metabolite.idx.ndps = this.metabolite.getIndex({'ADP[c]'; 'CDP[c]'; 'GDP[c]'; 'UDP[c]'});
             this.metabolite.idx.nmps = this.metabolite.getIndex({'AMP[c]'; 'CMP[c]'; 'GMP[c]'; 'UMP[c]'});
@@ -99,12 +104,15 @@ classdef Metabolism < wholecell.sim.process.Process
             this.metabolite.idx.h    = this.metabolite.getIndex('H[c]');
             
             %indices
-            nMet = numel(molIds) + 1;
+            nExchangeConstraints = 7;
+            
+            nMet = numel(molIds) + 1 + nExchangeConstraints;
             this.metIds = [this.metabolite.ids; 'biomass'];
             this.metNames = [this.metabolite.names; 'biomass'];
             this.metIdx = struct();
             this.metIdx.real = (1:numel(molIds))';
             this.metIdx.biomass = this.metIdx.real(end) + 1;
+            this.metIdx.exchangeConstraints = this.metIdx.biomass(end) + (1:nExchangeConstraints)';
             
             nRxn = numel(kb.reactions) + numel(molIds) + 2;
             mc = sim.getState('MoleculeCounts');
@@ -134,10 +142,6 @@ classdef Metabolism < wholecell.sim.process.Process
             this.rxnIdx.externalExchange = this.rxnIdx.exchange(cIdxs == iExtracellular);
             
             nEnz = numel(enzIds);
-            
-            %objective
-            this.objective = zeros(nRxn, 1);
-            this.objective(this.rxnIdx.growth) = 1;
             
             %stoichiometry matrix, enzymes, kinetics
             this.sMat = zeros(nMet, nRxn);
@@ -201,16 +205,22 @@ classdef Metabolism < wholecell.sim.process.Process
             tfs = ismember(metIds, molIds);
             metIds = metIds(tfs);
             metExs = metExs(tfs);
-            
-            this.bounds.exchange.lo(:) = 0;
-            this.bounds.exchange.up(:) = 0;
-            
+
             metIdxs = this.metabolite.getIndex(metIds);
             this.bounds.exchange.lo(this.rxnIdx.exchange(metIdxs)) = -metExs;
             this.bounds.exchange.up(this.rxnIdx.exchange(metIdxs)) =  metExs;
             
+            %exchange constraints
+            this.sMat(this.metIdx.exchangeConstraints(1), this.rxnIdx.exchange(this.metabolite.getIndex({'ATP[c]'; 'ADP[c]'; 'AMP[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(2), this.rxnIdx.exchange(this.metabolite.getIndex({'CTP[c]'; 'CDP[c]'; 'CMP[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(3), this.rxnIdx.exchange(this.metabolite.getIndex({'GTP[c]'; 'GDP[c]'; 'GMP[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(4), this.rxnIdx.exchange(this.metabolite.getIndex({'UTP[c]'; 'UDP[c]'; 'UMP[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(5), this.rxnIdx.exchange(this.metabolite.getIndex({'FTHF10[c]'; 'THF[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(6), this.rxnIdx.exchange(this.metabolite.getIndex({'FTHF10[c]'; 'FOR[c]'; 'FMET[c]'}))) = 1;
+            this.sMat(this.metIdx.exchangeConstraints(7), this.rxnIdx.exchange(this.metabolite.getIndex({'MET[c]'; 'FMET[c]'}))) = 1;
+            
             %objective
-            objMets = kb.metabolites([kb.metabolites.metabolismFlux] ~= 0);
+            objMets = kb.metabolites([kb.metabolites.metabolismNewFlux] ~= 0 | [kb.metabolites.metabolismRecyclingFlux] ~= 0);
             
             metComps = cell(numel(objMets), 1);
             metComps( [objMets.hydrophobic]) = {'m'};
@@ -219,7 +229,19 @@ classdef Metabolism < wholecell.sim.process.Process
             realMetIds = cellfun(@(x, y) [x '[' y ']'], {objMets.id}', metComps, 'UniformOutput', false);
             realMetIdxs = this.metabolite.getIndex(realMetIds);
             
-            this.sMat(this.metIdx.real(realMetIdxs), this.rxnIdx.growth) = -[objMets(realMetIdxs ~= 0).metabolismFlux]';
+            this.rxnNewFlux = zeros(nMet, 1);
+            this.rxnRecycFlux = zeros(nMet, 1);
+            this.rxnNewFlux(this.metIdx.real(realMetIdxs)) = [objMets(realMetIdxs ~= 0).metabolismNewFlux]';
+            this.rxnRecycFlux(this.metIdx.real(realMetIdxs)) = [objMets(realMetIdxs ~= 0).metabolismRecyclingFlux]';
+            
+            this.rxnIdx.internalNoRecycExchange = intersect(this.rxnIdx.exchange(this.rxnRecycFlux(this.rxnIdx.real) == 0), this.rxnIdx.internalExchange);
+            this.rxnIdx.internalRecycExchange = intersect(this.rxnIdx.exchange(this.rxnRecycFlux(this.rxnIdx.real) < 0), this.rxnIdx.internalExchange);
+            
+            this.sMat(this.metIdx.real, this.rxnIdx.growth) = -this.rxnNewFlux(this.metIdx.real);
+            
+            this.objective = zeros(nRxn, 1);
+            this.objective(this.rxnIdx.growth) = 1e3;
+            this.objective(this.rxnIdx.internalRecycExchange) = 1 / sum(min(0, this.rxnNewFlux));
             
             %dConc/dt
             this.dConc_dt = zeros(nMet, 1);
@@ -251,49 +273,23 @@ classdef Metabolism < wholecell.sim.process.Process
             
             %calculate growth rate
             [this.metabolism.growth, this.metabolism.fluxes, exRates] = this.calcGrowthRate(bounds);
+            growth_cellPerSec = (this.metabolism.growth / (3600 * this.avgCellInitMass));
             
             %update metabolite copy numbers
-            this.metabolite.counts = round(...
+            this.metabolite.counts = this.randStream.stochasticRound(...
                 + this.metabolite.counts ...
-                - this.sMat(this.metIdx.real, this.rxnIdx.growth) * (this.metabolism.growth / (3600 * this.avgCellInitMass)) * this.timeStepSec ...
+                - this.sMat(this.metIdx.real, this.rxnIdx.growth) * growth_cellPerSec * this.timeStepSec ...
                 + exRates * this.timeStepSec ...
                 );
             
-%             %NTP-->NDP
-%             tmp = min(0, this.metabolite.counts(this.metabolite.idx.ndps));
-%             this.metabolite.counts(this.metabolite.idx.ntps) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.ntps) ...
-%                 + tmp;
-%             this.metabolite.counts(this.metabolite.idx.h2o) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.h2o) ...
-%                 + sum(tmp);
-%             this.metabolite.counts(this.metabolite.idx.ndps) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.ndps) ...
-%                 - tmp;
-%             this.metabolite.counts(this.metabolite.idx.pi) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.pi) ...
-%                 - sum(tmp);
-%             this.metabolite.counts(this.metabolite.idx.h) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.h) ...
-%                 - sum(tmp);
-%             
-%             %NTP-->NMP
-%             tmp = min(0, this.metabolite.counts(this.metabolite.idx.nmps));
-%             this.metabolite.counts(this.metabolite.idx.ntps) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.ntps) ...
-%                 + tmp;
-%             this.metabolite.counts(this.metabolite.idx.h2o) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.h2o) ...
-%                 + sum(tmp);
-%             this.metabolite.counts(this.metabolite.idx.nmps) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.nmps) ...
-%                 - tmp;
-%             this.metabolite.counts(this.metabolite.idx.ppi) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.ppi) ...
-%                 - sum(tmp);
-%             this.metabolite.counts(this.metabolite.idx.h) = ...
-%                 + this.metabolite.counts(this.metabolite.idx.h) ...
-%                 - sum(tmp);
+            %unaccounted energy consumption
+            this.metabolite.counts(this.metabolite.idx.atpHydrolysis) = ...
+                + this.metabolite.counts(this.metabolite.idx.atpHydrolysis) ...
+                + [-1; -1; 1; 1; 1] * this.randStream.stochasticRound(...
+                this.unaccountedEnergyConsumption * growth_cellPerSec * this.timeStepSec);
+            
+            %make copy numbers positive
+            this.metabolite.counts = max(0, this.metabolite.counts);
         end
         
         function [growth, fluxes, exchangeRates] = calcGrowthRate(this, bounds)
@@ -303,8 +299,7 @@ classdef Metabolism < wholecell.sim.process.Process
             bounds.lo = min(0, max(bounds.lo * this.timeStepSec, -this.realMax));
             bounds.up = max(0, min(bounds.up * this.timeStepSec,  this.realMax));
             
-            %flux-balance analysis 
-            %TODO: make flexible similar to full whole-cell model
+            %flux-balance analysis
             [x, ~, ~, errorFlag, errorMsg] = linearProgramming(...
                 'maximize', this.objective, ...
                 this.sMat, this.dConc_dt, ...
@@ -317,7 +312,7 @@ classdef Metabolism < wholecell.sim.process.Process
             end
             
             %extract growth, real fluxes
-            x = x  / this.timeStepSec;
+            x = x / this.timeStepSec;
             growth = x(this.rxnIdx.growth) * 3600 * this.avgCellInitMass;
             fluxes = x(this.rxnIdx.real);
             exchangeRates = x(this.rxnIdx.exchange);
@@ -357,8 +352,8 @@ classdef Metabolism < wholecell.sim.process.Process
             
             %exchange
             if applyExchangeBounds
-                lo(this.rxnIdx.internalExchange) = 0;
-                up(this.rxnIdx.internalExchange) = 0;
+                lo(this.rxnIdx.internalNoRecycExchange) = 0;
+                up(this.rxnIdx.internalNoRecycExchange) = 0;
                 
                 lo(this.rxnIdx.externalExchange) = max(lo(this.rxnIdx.externalExchange), ...
                     this.bounds.exchange.lo(this.rxnIdx.externalExchange) * 6.022e23 * 1e-3 * 3600 * sum(this.mass.cellDry) * 1e-15);
@@ -368,10 +363,7 @@ classdef Metabolism < wholecell.sim.process.Process
             
             %metabolite availability
             if applyMetAvailBounds
-                idxs = find(ismember(this.rxnIdx.exchange, this.rxnIdx.externalExchange));
-                idxs = idxs(setdiff(1:end, [2 54 95 126 137 195 197 200 208 211 227])); %Todo
-                
-                lo(this.rxnIdx.exchange(idxs)) = max(lo(this.rxnIdx.exchange(idxs)), -metCnts(idxs) / this.timeStepSec);
+                lo(this.rxnIdx.exchange) = max(lo(this.rxnIdx.exchange), -metCnts / this.timeStepSec);
             end
             
             %protein %TODO

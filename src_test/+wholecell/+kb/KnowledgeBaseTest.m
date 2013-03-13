@@ -52,7 +52,8 @@ classdef KnowledgeBaseTest < TestCase
             assertEqual(false, met.hydrophobic);
             assertEqual(0, met.mediaConc);
             assertElementsAlmostEqual(3.5812e+03, met.biomassConc, 'relative', 1e-4);
-            assertElementsAlmostEqual(3.5812e+03, met.metabolismFlux, 'relative', 1e-4);
+            assertElementsAlmostEqual(3.5812e+03, met.metabolismNewFlux, 'relative', 1e-4);
+            assertElementsAlmostEqual(0, met.metabolismRecyclingFlux, 'relative', 1e-4);
             
             met = kb.metabolites(strcmp({kb.metabolites.id}, 'AC'));
             assertElementsAlmostEqual(0.304753, met.mediaConc, 'relative', 1e-4);

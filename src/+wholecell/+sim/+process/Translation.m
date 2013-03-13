@@ -78,9 +78,12 @@ classdef Translation < wholecell.sim.process.Process
         function val = calcReqMetabolites(this)
             val = zeros(size(this.metabolite.fullCounts));
             
-            elng = this.enzyme.fullCounts(this.enzyme.idx.ribosome70S) * this.elngRate * this.timeStepSec;
+            elng = min([
+                this.enzyme.fullCounts(this.enzyme.idx.ribosome70S) * this.elngRate * this.timeStepSec
+                sum(this.metabolite.fullCounts(this.metabolite.idx.aas))
+                ]);
             val(this.metabolite.idx.aas) = elng / numel(this.metabolite.idx.aas);
-            val([this.metabolite.idx.gtp; this.metabolite.idx.h2o]) = 2 * elng;
+            val([this.metabolite.idx.gtp; this.metabolite.idx.h2o]) = 4 * 2 * elng;
         end
         
         %calculate needed mRNA

@@ -71,8 +71,13 @@ classdef Transcription < wholecell.sim.process.Process
         %calculate needed metabolites
         function val = calcReqMetabolites(this)
             val = zeros(size(this.metabolite.fullCounts));
-            val([this.metabolite.idx.ntps; this.metabolite.idx.h2o]) = ...
-                this.enzyme.fullCounts(this.enzyme.idx.rnaPol) * this.elngRate * this.timeStepSec;
+            
+            val(this.metabolite.idx.ntps) = min([
+                this.enzyme.fullCounts(this.enzyme.idx.rnaPol) * this.elngRate * this.timeStepSec
+                4 * min(this.metabolite.fullCounts(this.metabolite.idx.ntps))
+                ]) / 4;
+            
+            val(this.metabolite.idx.h2o) = 1;
         end
         
         %calculate needed RNA

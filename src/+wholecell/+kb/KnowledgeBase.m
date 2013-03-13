@@ -59,7 +59,8 @@ classdef KnowledgeBase < handle
                     'hydrophobic', strcmp(raw{i, 7}, 'Y'), ...
                     'mediaConc', 0, ...
                     'biomassConc', 0, ...
-                    'metabolismFlux', 0, ...
+                    'metabolismNewFlux', 0, ...
+                    'metabolismRecyclingFlux', 0, ...
                     'maxExchangeRate', 0 ... %mmol/gDCW/h
                     );
                 if isnumeric(m.name) && isnan(m.name)
@@ -75,10 +76,13 @@ classdef KnowledgeBase < handle
                     m.biomassConc = raw{i, 9};
                 end
                 if ~isnan(raw{i, 10})
-                    m.metabolismFlux = raw{i, 10};
+                    m.metabolismNewFlux = raw{i, 10};
                 end
                 if ~isnan(raw{i, 11})
-                    m.maxExchangeRate = raw{i, 11};
+                    m.metabolismRecyclingFlux = raw{i, 11};
+                end
+                if ~isnan(raw{i, 12})
+                    m.maxExchangeRate = raw{i, 12};
                 end
                 this.metabolites = [this.metabolites; m];
             end
